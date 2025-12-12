@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>物理シミュレーション：y-xとy-tの反転関係</title>
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background-color: #222;
+        color: white;
+        font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        touch-action: manipulation;
+    }
+
+    #container {
+        width: 95%;
+        max-width: 1000px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding-bottom: 50px;
+    }
+
+    /* グラフ描画エリア */
+    #canvas-wrapper {
+        position: relative;
+        width: 100%;
+        margin-top: 10px;
+        background-color: #f9f9f9;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        overflow: hidden;
+    }
+    canvas {
+        display: block;
+        width: 100%;
+    }
+
+    /* 操作パネル */
+    #controls {
+        width: 100%;
+        margin-top: 15px;
+        background-color: #333;
+        padding: 15px;
+        border-radius: 8px;
+        box-sizing: border-box;
+    }
+
+    .control-row {
+        margin-bottom: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* ボタン共通スタイル */
+    button {
+        padding: 10px 14px;
+        font-size: 14px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        background-color: #555;
+        color: white;
+        transition: all 0.2s;
+        font-weight: bold;
+        flex: 1;
+        max-width: 150px;
+        min-width: 80px;
+    }
+    button:active { transform: scale(0.96); }
+    
+    /* 状態別ボタンスタイル */
+    button.active {
+        background-color: #008CBA;
+        box-shadow: 0 0 8px rgba(0, 140, 186, 0.6);
+    }
+    button.play-btn { background-color: #27ae60; }
+    button.pause-btn { background-color: #e67e22; }
+    button.stop-btn { background-color: #c0392b; }
+    
+    /* 選択中の再生ボタン強調 */
+    button.playing {
+        box-shadow: inset 0 0 0 2px white;
+        filter: brightness(1.2);
+    }
+
+    /* スライダー */
+    .slider-container {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        max-width: 300px;
+    }
+    label { font-size: 13px; color: #ccc; margin-right: 8px; min-width: 40px; }
+    input[type=range] {
+        flex-grow: 1;
+        height: 30px;
+        cursor: pointer;
+    }
+
+    @media (orientation: landscape) and (max-height: 500px) {
+        #container { flex-direction: row; align-items: flex-start; gap: 20px; }
+        #canvas-wrapper { flex: 2; }
+        #controls { flex: 1; overflow-y: auto; max-height: 90vh; }
+    }
+</style>
+</head>
+<body>
+
+<div id="container">
+    <div style="width:100%; display:flex; justify-content:space-between; align-items:flex-end;">
+        <h2 style="color:white; margin:5px 0; font-size:18px;">y-xグラフ ⇔ y-tグラフの変換</h2>
+    </div>
+
+    <div id="canvas-wrapper">
+        <canvas id="myCanvas"></canvas>
+    </div>
+
+    <div id="controls">
+        <!-- 波形の選択（パルス：三角） -->
+        <div class="control-row">
+            <button onclick="setWaveType('pulseA')" id="btn-pulseA" class="active">
+                右が急<br><small>三角１</small>
+            </button>
+            <button onclick="setWaveType('pulseB')" id="btn-pulseB">
+                左が急<br><small>三角１</small>
+            </button>
+            <button onclick="setWaveType('pulseC')" id="btn-pulseC">
+                対称<br><small>三角</small>
+            </button>
+        </div>
+
+        <!-- 波形の選択（パルス：台形＋正弦） -->
+        <div class="control-row">
+            <button onclick="setWaveType('pulseD')" id="btn-pulseD">
+                非対称１<br><small>台形（前短・後長）</small>
+            </button>
+            <button onclick="setWaveType('pulseE')" id="btn-pulseE">
+                非対称２<br><small>台形（前長・後短）</small>
+            </button>
+            <button onclick="setWaveType('sine')" id="btn-sine">
+                正弦波
+            </button>
+        </div>
+
+        <!-- 再生コントロール -->
+        <div class="control-row" style="background:#222; padding:10px; border-radius:6px;">
+            <button onclick="setSpeed('normal')" id="btn-play"  class="play-btn">再生</button>
+            <button onclick="setSpeed('slow')"   id="btn-slow"  class="play-btn" style="background-color:#2980b9;">スロー</button>
+            <button onclick="stepOnce()"         id="btn-step"  class="pause-btn">1コマ進む</button>
+            <button onclick="setSpeed('pause')"  id="btn-pause" class="pause-btn playing">一時停止</button>
+            <button onclick="resetSim()"         id="btn-reset" class="stop-btn">リセット</button>
+        </div>
+
+        <!-- 形・大きさの調整 -->
+        <div class="control-row">
+            <div class="slider-container">
+                <label>幅</label>
+                <input type="range" id="slider-width" min="50" max="300" step="10" value="150" oninput="updateParams()">
+            </div>
+            <div class="slider-container">
+                <label>振幅</label>
+                <input type="range" id="slider-amp" min="10" max="100" step="5" value="60" oninput="updateParams()">
+            </div>
+        </div>
+
+        <!-- 速さの調整 -->
+        <div class="control-row">
+            <div class="slider-container">
+                <label>速さ</label>
+                <input type="range" id="slider-speed" min="0.5" max="5" step="0.5" value="3" oninput="updateParams()">
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById("myCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // 状態管理
+    let state = {
+        time: 0,
+        playState: 'pause', // 'normal', 'slow', 'pause'
+        waveType: 'pulseA', // pulseA, pulseB, pulseC, pulseD, pulseE, sine
+        baseSpeed: 3.0,     // 基本速度（1フレームあたりに進む距離）
+        currentSpeed: 0,    // 現在の速度（スロー時は小さくなる）
+        widthParam: 150,    // 波の幅
+        amplitude: 60,
+        pointPX: 0,         // 点PのX座標 (左側)
+        historyP: [],       // 履歴データ {d:距離(≒時間), y:変位}
+        waveOffset: 0,      // パルス開始位置（右端を原点に合わせる）
+        totalDistance: 0    // 波がどれだけ右へ進んだか（≒時間）
+    };
+
+    let layout = {
+        width: 0, height: 0,
+        graph1Y: 0, graph2Y: 0, axisRange: 0
+    };
+
+    function init() {
+        resize();
+        window.addEventListener('resize', resize);
+        updateParams();
+        resetSim(); // 初期化時はリセット状態
+        loop();
+    }
+
+    function resize() {
+        const wrapper = document.getElementById('canvas-wrapper');
+        layout.width = wrapper.clientWidth;
+        const aspect = window.innerWidth < 600 ? 1.2 : 0.7;
+        layout.height = Math.min(window.innerHeight * 0.7, layout.width * aspect);
+        
+        canvas.width = layout.width;
+        canvas.height = layout.height;
+
+        layout.graph1Y = layout.height * 0.25;
+        layout.graph2Y = layout.height * 0.75;
+        layout.axisRange = layout.height * 0.18;
+
+        // 点Pを左寄り（15%の位置）に配置
+        state.pointPX = layout.width * 0.15;
+    }
+
+    function updateParams() {
+        state.widthParam = parseFloat(document.getElementById('slider-width').value);
+        state.amplitude = parseFloat(document.getElementById('slider-amp').value);
+
+        const speedSlider = document.getElementById('slider-speed');
+        if (speedSlider) {
+            state.baseSpeed = parseFloat(speedSlider.value);
+            if (state.playState === 'normal') {
+                state.currentSpeed = state.baseSpeed;
+            } else if (state.playState === 'slow') {
+                state.currentSpeed = state.baseSpeed * 0.2;
+            }
+        }
+    }
+
+    function setWaveType(type) {
+        state.waveType = type;
+        ['pulseA', 'pulseB', 'pulseC', 'pulseD', 'pulseE', 'sine'].forEach(t => {
+            const btn = document.getElementById('btn-' + t);
+            if (btn) {
+                if (t === type) btn.classList.add('active');
+                else btn.classList.remove('active');
+            }
+        });
+        resetSim(); // 波形を変えたらリセット
+    }
+
+    // 再生速度コントロール
+    function setSpeed(mode) {
+        state.playState = mode;
+        
+        // ボタンの見た目制御
+        document.getElementById('btn-play').classList.remove('playing');
+        document.getElementById('btn-slow').classList.remove('playing');
+        document.getElementById('btn-pause').classList.remove('playing');
+
+        if (mode === 'normal') {
+            state.currentSpeed = state.baseSpeed;
+            document.getElementById('btn-play').classList.add('playing');
+        } else if (mode === 'slow') {
+            state.currentSpeed = state.baseSpeed * 0.2; // 約5倍スロー
+            document.getElementById('btn-slow').classList.add('playing');
+        } else {
+            state.currentSpeed = 0;
+            document.getElementById('btn-pause').classList.add('playing');
+        }
+    }
+
+    // 1コマだけ進める（考える用）
+    function stepOnce() {
+        if (state.playState !== 'pause') {
+            setSpeed('pause');
+        }
+        const step = state.baseSpeed;
+        state.totalDistance += step;
+
+        const currentY = calcWaveShape(state.pointPX - state.totalDistance);
+        state.historyP.push({ d: state.totalDistance, y: currentY });
+        if (state.historyP.length > layout.width) {
+            state.historyP.shift();
+        }
+    }
+
+    // リセット機能
+    function resetSim() {
+        state.time = 0;
+        state.totalDistance = 0;
+        state.historyP = [];
+        setSpeed('pause'); // リセット時は停止
+
+        // パルス波のスタート：右端を原点 x=0 に合わせる
+        // パルスは区間 [-w, 0] に存在するように定義し，waveOffset=0 に固定。
+        state.waveOffset = 0;
+
+        // 初期状態の履歴（t=0）を1点だけ入れておく
+        const initialY = calcWaveShape(state.pointPX - state.totalDistance);
+        state.historyP.push({ d: 0, y: initialY });
+    }
+
+    // --- パルス形状の汎用関数 ---
+
+    // 非対称三角パルス：peakPos は 0〜1 のどこに頂点が来るか
+    function asymmetricTriangle(u, peakPos) {
+        if (u <= 0 || u >= 1) return 0;
+        if (u <= peakPos) {
+            return u / peakPos;
+        } else {
+            return (1 - u) / (1 - peakPos);
+        }
+    }
+
+    // 台形パルス：riseEnd まで立ち上がり，fallStart まで一定，そこから落ちる
+    function plateauPulse(u, riseEnd, fallStart) {
+        if (u <= 0 || u >= 1) return 0;
+        if (u < riseEnd) {
+            return u / riseEnd;               // 立ち上がり
+        } else if (u <= fallStart) {
+            return 1;                         // 一定（台形部分）
+        } else {
+            return (1 - u) / (1 - fallStart); // 落ちる
+        }
+    }
+
+    // 波の形（局所座標での形）を決める関数
+    function calcWaveShape(phaseX) {
+        const w = state.widthParam;
+        const h = state.amplitude;
+
+        // 正弦波
+        if (state.waveType === 'sine') {
+            const k = (2 * Math.PI) / w;
+            return -h * Math.sin(k * phaseX);
+        }
+
+        // パルス波（単発）：localX が [-w, 0] の区間にだけ存在
+        const localX = phaseX - state.waveOffset;
+
+        if (localX < -w || localX > 0) return 0;
+
+        // 正規化座標 u: 左端 -w → 0, 右端 0 → 1
+        const u = (localX + w) / w;
+        let a = 0;
+
+        switch (state.waveType) {
+            case 'pulseA':
+                // 右が急（三角・右寄り頂点）
+                a = asymmetricTriangle(u, 0.75);
+                break;
+            case 'pulseB':
+                // 左が急（三角・左寄り頂点）
+                a = asymmetricTriangle(u, 0.25);
+                break;
+            case 'pulseC':
+                // 対称三角
+                a = asymmetricTriangle(u, 0.5);
+                break;
+            case 'pulseD':
+                // 非対称１：前短・後長の台形
+                a = plateauPulse(u, 0.15, 0.55);
+                break;
+            case 'pulseE':
+                // 非対称２：前長・後短の台形
+                a = plateauPulse(u, 0.45, 0.85);
+                break;
+            default:
+                a = 0;
+        }
+
+        return -h * a;
+    }
+
+    function loop() {
+        // 時間の進行（速度に応じた距離の加算）
+        state.totalDistance += state.currentSpeed;
+        
+        // 履歴の更新（点Pでの変位の時間変化）
+        if (state.playState !== 'pause') {
+            const currentY = calcWaveShape(state.pointPX - state.totalDistance);
+            state.historyP.push({ d: state.totalDistance, y: currentY });
+            
+            if (state.historyP.length > layout.width) {
+                state.historyP.shift();
+            }
+        }
+
+        draw();
+        requestAnimationFrame(loop);
+    }
+
+    function draw() {
+        // 背景
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, layout.width, layout.height);
+
+        // --- 上段：y-x グラフ（位置の写真） ---
+        drawGrid(layout.graph1Y, "y-x グラフ（波の写真）", "位置 x →");
+        
+        ctx.beginPath();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "#008CBA";
+        ctx.lineJoin = "round";
+
+        // 画面全体に波を描画
+        for (let x = 0; x < layout.width; x += 4) {
+            const y = layout.graph1Y + calcWaveShape(x - state.totalDistance);
+            if (x === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // 点Pの現在位置
+        const currentY = calcWaveShape(state.pointPX - state.totalDistance);
+        const screenPY = layout.graph1Y + currentY;
+
+        // ガイド線（点Pの位置）
+        ctx.beginPath();
+        ctx.strokeStyle = "rgba(255, 0, 0, 0.15)";
+        ctx.lineWidth = 4;
+        ctx.moveTo(state.pointPX, layout.graph1Y - state.amplitude - 20);
+        ctx.lineTo(state.pointPX, layout.graph1Y + state.amplitude + 20);
+        ctx.stroke();
+
+        drawPoint(state.pointPX, screenPY, "red");
+        ctx.fillStyle = "#333";
+        ctx.font = "bold 14px sans-serif";
+        ctx.fillText("点P", state.pointPX - 10, screenPY - 15);
+
+        // --- 下段：y-t グラフ（点Pの記録＝歴史） ---
+        drawGrid(layout.graph2Y, "y-t グラフ（点Pの動きの記録）", "時間 t →");
+
+        ctx.beginPath();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "#e67e22";
+        ctx.lineJoin = "round";
+
+        const graphStartX = state.pointPX;
+        let hasStarted = false;
+
+        if (state.historyP.length > 0) {
+            const startD = state.historyP[0].d || 0;
+            
+            for (let i = 0; i < state.historyP.length; i++) {
+                const data = state.historyP[i];
+                if (typeof data.d !== "number") continue;
+
+                const plotX = graphStartX + (data.d - startD);
+                if (plotX <= layout.width) {
+                    const plotY = layout.graph2Y + data.y;
+                    if (!hasStarted) {
+                        ctx.moveTo(plotX, plotY);
+                        hasStarted = true;
+                    } else {
+                        ctx.lineTo(plotX, plotY);
+                    }
+                }
+            }
+        }
+        ctx.stroke();
+
+        // 現在のペン先（グラフの右端）
+        if (state.historyP.length > 0) {
+            const lastData = state.historyP[state.historyP.length - 1];
+            const startD = state.historyP[0].d || 0;
+            const currentPlotX = graphStartX + ((typeof lastData.d === "number" ? lastData.d : 0) - startD);
+            
+            drawPoint(currentPlotX, layout.graph2Y + currentY, "red");
+            
+            // 点P(上段) と グラフ先端(下段) を結ぶガイド線
+            ctx.beginPath();
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = "rgba(255, 0, 0, 0.3)";
+            ctx.lineWidth = 1;
+            ctx.moveTo(state.pointPX, screenPY);
+            ctx.lineTo(currentPlotX, layout.graph2Y + currentY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    }
+
+    function drawGrid(centerY, title, xLabel) {
+        // 中心線（y=0）
+        ctx.strokeStyle = "#ccc";
+        ctx.lineWidth = 1;
+        
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        ctx.lineTo(layout.width, centerY);
+        ctx.stroke();
+
+        // 点Pの位置に縦線
+        ctx.beginPath();
+        ctx.strokeStyle = "#ddd";
+        ctx.moveTo(state.pointPX, centerY - layout.axisRange);
+        ctx.lineTo(state.pointPX, centerY + layout.axisRange);
+        ctx.stroke();
+
+        ctx.fillStyle = "#555";
+        ctx.font = "14px sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(title, state.pointPX + 5, centerY - layout.axisRange + 5);
+        
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "right";
+        ctx.fillText(xLabel, layout.width - 10, centerY + 20);
+        ctx.textAlign = "left";
+        ctx.fillText("変位 y", state.pointPX + 5, centerY - layout.axisRange + 22);
+    }
+
+    function drawPoint(x, y, color) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+    init();
+</script>
+</body>
+</html>
